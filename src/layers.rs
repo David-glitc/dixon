@@ -1,4 +1,4 @@
-// primitive_ml/src/layers.rs
+//! Dense layer implementation with weights, bias, and activation function.
 use crate::activations::Activation;
 use std::sync::Arc;
 use rand::Rng;

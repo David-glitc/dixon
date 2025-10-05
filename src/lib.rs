@@ -16,7 +16,7 @@ pub mod utils;
 
 pub use activations::{Activation, ReLU, Sigmoid, Softmax, Linear};
 pub use layers::DenseLayer;
-pub use network::MLP;
+pub use network::{MLP, Gradients};
 pub use loss::{mse_loss, mse_deriv, cross_entropy_loss, cross_entropy_deriv};
 pub use metrics::{accuracy, confusion_matrix};
 pub use datasets::{load_iris, load_mnist};

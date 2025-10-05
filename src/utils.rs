@@ -1,4 +1,4 @@
-// primitive_ml/src/utils.rs
+//! Utility functions for neural network training and evaluation.
 use crate::network::MLP;
 use rand::Rng;
 

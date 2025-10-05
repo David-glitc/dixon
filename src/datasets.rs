@@ -1,4 +1,4 @@
-// primitive_ml/src/datasets.rs
+//! Dataset loading utilities for Iris and MNIST.
 use anyhow::{anyhow, Result};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;

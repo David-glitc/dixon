@@ -1,4 +1,4 @@
-// primitive_ml/src/metrics.rs
+//! Metrics for evaluating neural network performance.
 /// Accuracy
 pub fn accuracy(dataset: &[(Vec<f64>, Vec<f64>)], model: &crate::network::MLP) -> f64 {
     let mut correct = 0;

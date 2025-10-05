@@ -1,8 +1,9 @@
-// primitive_ml/src/network.rs
+//! Multi-Layer Perceptron (MLP) implementation with training and persistence.
 use crate::activations::{Activation, Softmax, ActivationKind, identify_activation_kind};
 use std::sync::Arc;
 use crate::{cross_entropy_loss, mse_loss};
 use crate::layers::DenseLayer;
+use crate::layers::Matrix;
 use crate::loss::mse_deriv;
 use crate::metrics::accuracy;
 use anyhow::{anyhow, Result};
@@ -24,6 +25,13 @@ pub struct MLP {
     /// Number of outputs/classes.
     output_size: usize,
 }
+/// Gradients for all layers in order
+#[derive(Debug)]
+pub struct Gradients {
+    pub d_w: Vec<Matrix>,
+    pub db: Vec<Vec<f64>>,
+}
+
 
 impl MLP {
     /// Create a new MLP with the given sizes.
@@ -153,6 +161,91 @@ impl MLP {
         accuracy(dataset, self)
     }
 
+    /// Compute gradients (dW, db) for a single sample.
+    pub fn compute_gradients(&self, input: &[f64], target: &[f64], loss_type: &str) -> Result<Gradients> {
+        if input.len() != self.input_size || target.len() != self.output_size {
+            return Err(anyhow!("Input/target size mismatch"));
+        }
+        // Forward cache
+        let mut activations = vec![input.to_vec()];
+        let mut zs: Vec<Vec<f64>> = Vec::with_capacity(self.layers.len());
+        let mut current = input.to_vec();
+        for layer in &self.layers {
+            let (z, a) = layer.forward(&current);
+            zs.push(z);
+            activations.push(a.clone());
+            current = a;
+        }
+        // Output prediction and initial delta
+        let logits_last = zs.last().expect("No layers in MLP");
+        let (_pred, mut delta) = if loss_type == "ce" {
+            let mut y_hat = Softmax.apply_vec(logits_last);
+            let eps = 1e-12;
+            for p in &mut y_hat {
+                if !p.is_finite() || *p < eps { *p = eps; } else if *p > 1.0 - eps { *p = 1.0 - eps; }
+            }
+            let d: Vec<f64> = y_hat.iter().zip(target).map(|(&p, &t)| p - t).collect();
+            (y_hat, d)
+        } else {
+            let d = mse_deriv(&current, target);
+            (current, d)
+        };
+
+        // Backward pass to accumulate gradients
+        let mut d_w: Vec<Matrix> = Vec::with_capacity(self.layers.len());
+        let mut db: Vec<Vec<f64>> = Vec::with_capacity(self.layers.len());
+        // reverse iterate layers
+        for layer_idx in (0..self.layers.len()).rev() {
+            let layer = &self.layers[layer_idx];
+            let z = &zs[layer_idx];
+            let a_prev = &activations[layer_idx];
+            // dz
+            let dz: Vec<f64> = if loss_type == "ce" && layer_idx == self.layers.len() - 1 {
+                delta.clone()
+            } else {
+                delta.iter().zip(z).map(|(&d, &val)| d * layer.activation.derivative(val)).collect()
+            };
+            // db
+            db.push(dz.clone());
+            // dW = dz (outer) a_prev
+            let mut d_w_layer: Matrix = vec![vec![0.0; a_prev.len()]; dz.len()];
+            for i in 0..dz.len() {
+                for j in 0..a_prev.len() {
+                    d_w_layer[i][j] = dz[i] * a_prev[j];
+                }
+            }
+            d_w.push(d_w_layer);
+            // delta_prev = W^T * dz
+            let mut delta_prev = vec![0.0; a_prev.len()];
+            for (i, row) in layer.weights.iter().enumerate() {
+                for (j, &w) in row.iter().enumerate() {
+                    delta_prev[j] += w * dz[i];
+                }
+            }
+            delta = delta_prev;
+        }
+        // reverse back to layer order
+        d_w.reverse();
+        db.reverse();
+        Ok(Gradients { d_w, db })
+    }
+
+    /// Apply gradients (SGD step).
+    pub fn apply_gradients(&mut self, grads: &Gradients, lr: f64) {
+        for (layer, (d_w, db)) in self.layers.iter_mut().zip(grads.d_w.iter().zip(grads.db.iter())) {
+            // bias
+            for (b, &g) in layer.bias.iter_mut().zip(db.iter()) {
+                *b -= lr * g;
+            }
+            // weights
+            for (i, row) in layer.weights.iter_mut().enumerate() {
+                for (j, w) in row.iter_mut().enumerate() {
+                    *w -= lr * d_w[i][j];
+                }
+            }
+        }
+    }
+
     /// Save model to .pere (gzipped JSON).
     pub fn save_pere(&self, path: &str) -> Result<()> {
         let dto = MlpDto::from_mlp(self);
@@ -206,6 +299,15 @@ struct MlpDto {
 
 impl MlpDto {
     fn from_mlp(mlp: &MLP) -> Self {
+        fn sanitize_f64(x: f64) -> f64 {
+            if x.is_finite() { x } else { 0.0 }
+        }
+        fn sanitize_vec(v: &[f64]) -> Vec<f64> {
+            v.iter().map(|&x| sanitize_f64(x)).collect()
+        }
+        fn sanitize_matrix(m: &Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+            m.iter().map(|row| sanitize_vec(row)).collect()
+        }
         let mut prev = mlp.input_size;
         let layers = mlp
             .layers
@@ -216,8 +318,8 @@ impl MlpDto {
                 let dto = LayerDto {
                     input_size: prev,
                     output_size: out,
-                    weights: layer.weights.clone(),
-                    bias: layer.bias.clone(),
+                    weights: sanitize_matrix(&layer.weights),
+                    bias: sanitize_vec(&layer.bias),
                     activation: act_kind,
                 };
                 prev = out;
@@ -232,7 +334,7 @@ impl MlpDto {
     }
 
     fn into_mlp(self) -> MLP {
-        use std::sync::Arc;
+        // use std::sync::Arc;
         let mut layers: Vec<DenseLayer> = Vec::with_capacity(self.layers.len());
         for ld in &self.layers {
             let mut layer = DenseLayer::new(

@@ -1,4 +1,4 @@
-// primitive_ml/src/loss.rs
+//! Loss functions for training neural networks.
 use anyhow::{anyhow, Result};
 
 /// MSE loss

@@ -1,19 +1,17 @@
 // ml_examples/src/main.rs
 use anyhow::Result;
-use primitive_ml::{
-    load_iris, load_mnist, print_model_summary, print_summary_table, ReLU, Sigmoid, MLP,
-};
+use primitive_ml::{load_iris, load_mnist, print_model_summary, ReLU, Sigmoid, MLP};
 use std::sync::Arc;
 
 fn main() -> Result<()> {
     #[cfg(feature = "iris")]
     {
         println!("=== Iris Dataset ===");
-        let iris_csv = concat!(env!("CARGO_MANIFEST_DIR"), "/src/iris.csv");
+        let iris_csv = "data/iris.csv";
         let iris_data = load_iris(iris_csv)?;
         let mut mlp_iris = MLP::new(4, vec![10, 5], 3, Arc::new(Sigmoid));
         print_model_summary(&mlp_iris);
-        mlp_iris.train(&iris_data, 200, 0.1, "ce")?;
+        mlp_iris.train(&iris_data, 1000, 0.1, "ce")?;
         let iris_acc = mlp_iris.evaluate(&iris_data);
         println!("Iris Accuracy: {:.2}%", iris_acc * 100.0);
 
@@ -22,6 +20,28 @@ fn main() -> Result<()> {
         let reloaded_iris = MLP::load_pere("models/iris_model.pere")?;
         let iris_acc_loaded = reloaded_iris.evaluate(&iris_data);
         println!("Iris Accuracy (reloaded): {:.2}%", iris_acc_loaded * 100.0);
+
+        // Backprop demo: manual SGD (small epochs for illustration)
+        println!("\n--- Iris Backprop Demo (manual SGD) ---");
+        let mut iris_bp = MLP::new(4, vec![10, 5], 3, Arc::new(Sigmoid));
+        let epochs_bp = 20;
+        let lr_bp = 0.1;
+        for _ in 0..epochs_bp {
+            let mut loss_sum = 0.0;
+            for (x, y) in &iris_data {
+                let grads = iris_bp.compute_gradients(x, y, "ce")?;
+                iris_bp.apply_gradients(&grads, lr_bp);
+                // reuse forward output via predict for quick CE approx (not exact batch loss)
+                let pred = iris_bp.predict(x);
+                loss_sum += primitive_ml::cross_entropy_loss(&pred, y)?;
+            }
+            let avg = loss_sum / iris_data.len() as f64;
+            println!("Iris BP Avg Loss: {:.6}", avg);
+        }
+        println!(
+            "Iris BP Accuracy: {:.2}%",
+            iris_bp.evaluate(&iris_data) * 100.0
+        );
     }
 
     #[cfg(feature = "mnist")]
@@ -39,7 +59,33 @@ fn main() -> Result<()> {
         mlp_mnist.save_pere("models/mnist_model.pere")?;
         let reloaded_mnist = MLP::load_pere("models/mnist_model.pere")?;
         let mnist_acc_loaded = reloaded_mnist.evaluate(&mnist_data);
-        println!("MNIST Accuracy (reloaded): {:.2}%", mnist_acc_loaded * 100.0);
+        println!(
+            "MNIST Accuracy (reloaded): {:.2}%",
+            mnist_acc_loaded * 100.0
+        );
+
+        // Backprop demo: manual SGD on a small subset for speed
+        println!("\n--- MNIST Backprop Demo (manual SGD, 200 samples) ---");
+        let mut mnist_bp = MLP::new(784, vec![128, 64], 10, Arc::new(ReLU));
+        let mut subset = mnist_data.clone();
+        subset.truncate(200);
+        let epochs_bp = 3;
+        let lr_bp = 0.03;
+        for _ in 0..epochs_bp {
+            let mut loss_sum = 0.0;
+            for (x, y) in &subset {
+                let grads = mnist_bp.compute_gradients(x, y, "ce")?;
+                mnist_bp.apply_gradients(&grads, lr_bp);
+                let pred = mnist_bp.predict(x);
+                loss_sum += primitive_ml::cross_entropy_loss(&pred, y)?;
+            }
+            let avg = loss_sum / subset.len() as f64;
+            println!("MNIST BP Avg Loss: {:.6}", avg);
+        }
+        println!(
+            "MNIST BP (subset) Accuracy: {:.2}%",
+            mnist_bp.evaluate(&subset) * 100.0
+        );
     }
 
     Ok(())
