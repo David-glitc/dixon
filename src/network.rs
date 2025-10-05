@@ -237,9 +237,9 @@ impl MLP {
             db.push(dz.clone());
             // dW = dz (outer) a_prev
             let mut d_w_layer: Matrix = vec![vec![0.0; a_prev.len()]; dz.len()];
-            for i in 0..dz.len() {
-                for j in 0..a_prev.len() {
-                    d_w_layer[i][j] = dz[i] * a_prev[j];
+            for (i, dz_i) in dz.iter().copied().enumerate() {
+                for (j, &a_prev_j) in a_prev.iter().enumerate() {
+                    d_w_layer[i][j] = dz_i * a_prev_j;
                 }
             }
             d_w.push(d_w_layer);
@@ -343,7 +343,7 @@ impl MlpDto {
         fn sanitize_vec(v: &[f64]) -> Vec<f64> {
             v.iter().map(|&x| sanitize_f64(x)).collect()
         }
-        fn sanitize_matrix(m: &Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+        fn sanitize_matrix(m: &[Vec<f64>]) -> Vec<Vec<f64>> {
             m.iter().map(|row| sanitize_vec(row)).collect()
         }
         let mut prev = mlp.input_size;
