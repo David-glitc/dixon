@@ -1,0 +1,5 @@
+/target
+
+*.pere
+data/**
+models/**
