@@ -1,7 +1,7 @@
 //! Dense layer implementation with weights, bias, and activation function.
 use crate::activations::Activation;
-use std::sync::Arc;
 use rand::Rng;
+use std::sync::Arc;
 
 /// Matrix type
 pub type Matrix = Vec<Vec<f64>>;
@@ -25,17 +25,28 @@ impl DenseLayer {
         // He uniform: U(-sqrt(6/fan_in), sqrt(6/fan_in))
         let limit = (6.0f64 / (input_size as f64)).sqrt();
         let weights: Matrix = (0..output_size)
-            .map(|_| (0..input_size).map(|_| rng.gen_range(-limit..limit)).collect())
+            .map(|_| {
+                (0..input_size)
+                    .map(|_| rng.gen_range(-limit..limit))
+                    .collect()
+            })
             .collect();
         let bias = vec![0.01; output_size];
-        Self { weights, bias, activation }
+        Self {
+            weights,
+            bias,
+            activation,
+        }
     }
 
     /// Forward pass: computes pre-activations `z = W·x + b` and activations `a = act(z)`.
     pub fn forward(&self, input: &[f64]) -> (Vec<f64>, Vec<f64>) {
-        let z: Vec<f64> = self.weights.iter().zip(&self.bias).map(|(row, &b)| {
-            row.iter().zip(input).map(|(&w, &i)| w * i).sum::<f64>() + b
-        }).collect();
+        let z: Vec<f64> = self
+            .weights
+            .iter()
+            .zip(&self.bias)
+            .map(|(row, &b)| row.iter().zip(input).map(|(&w, &i)| w * i).sum::<f64>() + b)
+            .collect();
         let a: Vec<f64> = z.iter().map(|&val| self.activation.apply(val)).collect();
         (z, a)
     }
@@ -43,7 +54,11 @@ impl DenseLayer {
     /// Backward helper: given `dL/da` and `z`, compute `dL/da_prev`.
     pub fn backward(&self, da: &[f64], z: &[f64]) -> Vec<f64> {
         // dz = da * act'(z)
-        let dz: Vec<f64> = da.iter().zip(z).map(|(&d, &val)| d * self.activation.derivative(val)).collect();
+        let dz: Vec<f64> = da
+            .iter()
+            .zip(z)
+            .map(|(&d, &val)| d * self.activation.derivative(val))
+            .collect();
         // da_prev = W^T * dz
         let mut da_prev = vec![0.0; self.weights[0].len()];
         for (i, row) in self.weights.iter().enumerate() {

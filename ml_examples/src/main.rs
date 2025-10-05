@@ -1,6 +1,6 @@
 // ml_examples/src/main.rs
 use anyhow::Result;
-use primitive_ml::{load_iris, load_mnist, print_model_summary, ReLU, Sigmoid, MLP};
+use dixon::{load_iris, load_mnist, print_model_summary, Linear, ReLU, Sigmoid, MLP};
 use std::sync::Arc;
 
 fn main() -> Result<()> {
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
                 iris_bp.apply_gradients(&grads, lr_bp);
                 // reuse forward output via predict for quick CE approx (not exact batch loss)
                 let pred = iris_bp.predict(x);
-                loss_sum += primitive_ml::cross_entropy_loss(&pred, y)?;
+                loss_sum += dixon::cross_entropy_loss(&pred, y)?;
             }
             let avg = loss_sum / iris_data.len() as f64;
             println!("Iris BP Avg Loss: {:.6}", avg);
@@ -50,6 +50,12 @@ fn main() -> Result<()> {
         let mut mnist_data = load_mnist(true)?;
         mnist_data.truncate(1000);
         let mut mlp_mnist = MLP::new(784, vec![128, 64], 10, Arc::new(ReLU));
+        // Use Linear activation on output to align with softmax-on-logits in loss
+        mlp_mnist
+            .layers
+            .last_mut()
+            .expect("output layer")
+            .activation = Arc::new(Linear);
         print_model_summary(&mlp_mnist);
         mlp_mnist.train(&mnist_data, 20, 0.05, "ce")?;
         let mnist_acc = mlp_mnist.evaluate(&mnist_data);
@@ -57,12 +63,21 @@ fn main() -> Result<()> {
 
         // Demo: save and load model
         mlp_mnist.save_pere("models/mnist_model.pere")?;
-        let reloaded_mnist = MLP::load_pere("models/mnist_model.pere")?;
-        let mnist_acc_loaded = reloaded_mnist.evaluate(&mnist_data);
-        println!(
-            "MNIST Accuracy (reloaded): {:.2}%",
-            mnist_acc_loaded * 100.0
-        );
+        match MLP::load_pere("models/mnist_model.pere") {
+            Ok(reloaded_mnist) => {
+                let mnist_acc_loaded = reloaded_mnist.evaluate(&mnist_data);
+                println!(
+                    "MNIST Accuracy (reloaded): {:.2}%",
+                    mnist_acc_loaded * 100.0
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: failed to load mnist_model.pere ({}). Skipping load demo.",
+                    e
+                );
+            }
+        }
 
         // Backprop demo: manual SGD on a small subset for speed
         println!("\n--- MNIST Backprop Demo (manual SGD, 200 samples) ---");
@@ -77,7 +92,7 @@ fn main() -> Result<()> {
                 let grads = mnist_bp.compute_gradients(x, y, "ce")?;
                 mnist_bp.apply_gradients(&grads, lr_bp);
                 let pred = mnist_bp.predict(x);
-                loss_sum += primitive_ml::cross_entropy_loss(&pred, y)?;
+                loss_sum += dixon::cross_entropy_loss(&pred, y)?;
             }
             let avg = loss_sum / subset.len() as f64;
             println!("MNIST BP Avg Loss: {:.6}", avg);

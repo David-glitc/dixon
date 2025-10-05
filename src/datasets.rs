@@ -1,18 +1,20 @@
 //! Dataset loading utilities for Iris and MNIST.
 use anyhow::{anyhow, Result};
+use byteorder::{BigEndian, ReadBytesExt};
 use csv::ReaderBuilder;
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read};
-use byteorder::{BigEndian, ReadBytesExt};
 
 pub type Dataset = Vec<(Vec<f64>, Vec<f64>)>;
 
 /// One-hot encode
 pub fn one_hot(label: usize, num_classes: usize) -> Vec<f64> {
     let mut v = vec![0.0; num_classes];
-    if label < num_classes { v[label] = 1.0; }
+    if label < num_classes {
+        v[label] = 1.0;
+    }
     v
 }
 
@@ -28,16 +30,26 @@ pub fn load_iris(filename: &str) -> Result<Dataset> {
 
     for result in rdr.records() {
         let record = result.map_err(|e| anyhow!("CSV parse error: {}", e))?;
-        if record.len() != 5 { continue; }
-        let features: Vec<f64> = record.iter().take(4).map(|s| s.parse().unwrap_or(0.0)).collect();
+        if record.len() != 5 {
+            continue;
+        }
+        let features: Vec<f64> = record
+            .iter()
+            .take(4)
+            .map(|s| s.parse().unwrap_or(0.0))
+            .collect();
         let species = record[4].trim_matches('"').to_lowercase();
         // Normalize values like "Iris-setosa" -> "setosa"
         let species_norm = species.trim().trim_start_matches("iris-").to_string();
-        let label = *species_map.get(&species_norm).ok_or_else(|| anyhow!("Unknown species: {}", species))?;
+        let label = *species_map
+            .get(&species_norm)
+            .ok_or_else(|| anyhow!("Unknown species: {}", species))?;
         let target = one_hot(label, 3);
         dataset.push((features, target));
     }
-    if dataset.is_empty() { return Err(anyhow!("No data loaded from Iris")); }
+    if dataset.is_empty() {
+        return Err(anyhow!("No data loaded from Iris"));
+    }
     Ok(dataset)
 }
 
@@ -50,16 +62,22 @@ struct MnistData {
 
 impl MnistData {
     fn new(filename: &str) -> Result<Self> {
-        let file = File::open(filename).map_err(|e| anyhow!("Failed to open {}: {}", filename, e))?;
+        let file =
+            File::open(filename).map_err(|e| anyhow!("Failed to open {}: {}", filename, e))?;
         let mut gz = GzDecoder::new(file);
         let mut contents = Vec::new();
-        gz.read_to_end(&mut contents).map_err(|e| anyhow!("Gzip read error: {}", e))?;
+        gz.read_to_end(&mut contents)
+            .map_err(|e| anyhow!("Gzip read error: {}", e))?;
         let mut r = Cursor::new(&contents);
-        let magic = r.read_i32::<BigEndian>().map_err(|e| anyhow!("Read magic: {}", e))?;
+        let magic = r
+            .read_i32::<BigEndian>()
+            .map_err(|e| anyhow!("Read magic: {}", e))?;
         let mut sizes = Vec::new();
         let mut data = Vec::new();
         match magic {
-            2049 => { sizes.push(r.read_i32::<BigEndian>()?); }
+            2049 => {
+                sizes.push(r.read_i32::<BigEndian>()?);
+            }
             2051 => {
                 sizes.push(r.read_i32::<BigEndian>()?);
                 sizes.push(r.read_i32::<BigEndian>()?);
@@ -67,7 +85,8 @@ impl MnistData {
             }
             _ => return Err(anyhow!("Invalid magic: {}", magic)),
         }
-        r.read_to_end(&mut data).map_err(|e| anyhow!("Read data: {}", e))?;
+        r.read_to_end(&mut data)
+            .map_err(|e| anyhow!("Read data: {}", e))?;
         Ok(Self { sizes, data })
     }
 }
@@ -95,6 +114,8 @@ pub fn load_mnist(train: bool) -> Result<Dataset> {
         let target = one_hot(label, 10);
         dataset.push((input, target));
     }
-    if dataset.is_empty() { return Err(anyhow!("No MNIST data loaded")); }
+    if dataset.is_empty() {
+        return Err(anyhow!("No MNIST data loaded"));
+    }
     Ok(dataset)
 }

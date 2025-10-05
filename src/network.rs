@@ -1,19 +1,20 @@
 //! Multi-Layer Perceptron (MLP) implementation with training and persistence.
-use crate::activations::{Activation, Softmax, ActivationKind, identify_activation_kind};
-use std::sync::Arc;
-use crate::{cross_entropy_loss, mse_loss};
+use crate::activations::{identify_activation_kind, Activation, ActivationKind, Softmax};
 use crate::layers::DenseLayer;
 use crate::layers::Matrix;
 use crate::loss::mse_deriv;
 use crate::metrics::accuracy;
+use crate::{cross_entropy_loss, mse_loss};
 use anyhow::{anyhow, Result};
-use std::fmt;
-use serde::{Serialize, Deserialize};
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use flate2::read::GzDecoder;
+use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::sync::Arc;
 
 /// MLP
 #[derive(Debug)]
@@ -31,7 +32,6 @@ pub struct Gradients {
     pub d_w: Vec<Matrix>,
     pub db: Vec<Vec<f64>>,
 }
-
 
 impl MLP {
     /// Create a new MLP with the given sizes.
@@ -72,14 +72,25 @@ impl MLP {
     }
 
     /// Train with MSE or cross-entropy (loss_type: "mse" or "ce").
-    pub fn train(&mut self, dataset: &[(Vec<f64>, Vec<f64>)], epochs: usize, lr: f64, loss_type: &str) -> Result<()> {
+    pub fn train(
+        &mut self,
+        dataset: &[(Vec<f64>, Vec<f64>)],
+        epochs: usize,
+        lr: f64,
+        loss_type: &str,
+    ) -> Result<()> {
         if dataset.is_empty() {
             return Err(anyhow!("Dataset is empty"));
         }
         let mut losses = Vec::new();
         for epoch in 0..epochs {
             let mut total_loss = 0.0;
-            for (input, target) in dataset {
+            // Shuffle sample order each epoch for SGD stability
+            let mut indices: Vec<usize> = (0..dataset.len()).collect();
+            let mut rng = rand::thread_rng();
+            indices.as_mut_slice().shuffle(&mut rng);
+            for &idx in &indices {
+                let (input, target) = &dataset[idx];
                 if input.len() != self.input_size || target.len() != self.output_size {
                     return Err(anyhow!("Input/target size mismatch"));
                 }
@@ -129,7 +140,11 @@ impl MLP {
                     let dz: Vec<f64> = if loss_type == "ce" && layer_idx == last_layer_index {
                         delta.clone()
                     } else {
-                        delta.iter().zip(z).map(|(&d, &val)| d * layer.activation.derivative(val)).collect()
+                        delta
+                            .iter()
+                            .zip(z)
+                            .map(|(&d, &val)| d * layer.activation.derivative(val))
+                            .collect()
                     };
                     // Update
                     layer.update(a_prev, &dz, lr);
@@ -162,7 +177,12 @@ impl MLP {
     }
 
     /// Compute gradients (dW, db) for a single sample.
-    pub fn compute_gradients(&self, input: &[f64], target: &[f64], loss_type: &str) -> Result<Gradients> {
+    pub fn compute_gradients(
+        &self,
+        input: &[f64],
+        target: &[f64],
+        loss_type: &str,
+    ) -> Result<Gradients> {
         if input.len() != self.input_size || target.len() != self.output_size {
             return Err(anyhow!("Input/target size mismatch"));
         }
@@ -182,7 +202,11 @@ impl MLP {
             let mut y_hat = Softmax.apply_vec(logits_last);
             let eps = 1e-12;
             for p in &mut y_hat {
-                if !p.is_finite() || *p < eps { *p = eps; } else if *p > 1.0 - eps { *p = 1.0 - eps; }
+                if !p.is_finite() || *p < eps {
+                    *p = eps;
+                } else if *p > 1.0 - eps {
+                    *p = 1.0 - eps;
+                }
             }
             let d: Vec<f64> = y_hat.iter().zip(target).map(|(&p, &t)| p - t).collect();
             (y_hat, d)
@@ -203,7 +227,11 @@ impl MLP {
             let dz: Vec<f64> = if loss_type == "ce" && layer_idx == self.layers.len() - 1 {
                 delta.clone()
             } else {
-                delta.iter().zip(z).map(|(&d, &val)| d * layer.activation.derivative(val)).collect()
+                delta
+                    .iter()
+                    .zip(z)
+                    .map(|(&d, &val)| d * layer.activation.derivative(val))
+                    .collect()
             };
             // db
             db.push(dz.clone());
@@ -232,7 +260,11 @@ impl MLP {
 
     /// Apply gradients (SGD step).
     pub fn apply_gradients(&mut self, grads: &Gradients, lr: f64) {
-        for (layer, (d_w, db)) in self.layers.iter_mut().zip(grads.d_w.iter().zip(grads.db.iter())) {
+        for (layer, (d_w, db)) in self
+            .layers
+            .iter_mut()
+            .zip(grads.d_w.iter().zip(grads.db.iter()))
+        {
             // bias
             for (b, &g) in layer.bias.iter_mut().zip(db.iter()) {
                 *b -= lr * g;
@@ -250,7 +282,9 @@ impl MLP {
     pub fn save_pere(&self, path: &str) -> Result<()> {
         let dto = MlpDto::from_mlp(self);
         let json = serde_json::to_vec(&dto)?;
-        if let Some(parent) = std::path::Path::new(path).parent() { std::fs::create_dir_all(parent)?; }
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let file = File::create(path)?;
         let mut enc = GzEncoder::new(file, Compression::default());
         enc.write_all(&json)?;
@@ -300,7 +334,11 @@ struct MlpDto {
 impl MlpDto {
     fn from_mlp(mlp: &MLP) -> Self {
         fn sanitize_f64(x: f64) -> f64 {
-            if x.is_finite() { x } else { 0.0 }
+            if x.is_finite() {
+                x
+            } else {
+                0.0
+            }
         }
         fn sanitize_vec(v: &[f64]) -> Vec<f64> {
             v.iter().map(|&x| sanitize_f64(x)).collect()
@@ -337,11 +375,7 @@ impl MlpDto {
         // use std::sync::Arc;
         let mut layers: Vec<DenseLayer> = Vec::with_capacity(self.layers.len());
         for ld in &self.layers {
-            let mut layer = DenseLayer::new(
-                ld.input_size,
-                ld.output_size,
-                ld.activation.to_arc(),
-            );
+            let mut layer = DenseLayer::new(ld.input_size, ld.output_size, ld.activation.to_arc());
             layer.weights = ld.weights.clone();
             layer.bias = ld.bias.clone();
             layers.push(layer);

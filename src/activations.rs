@@ -1,6 +1,6 @@
-use std::fmt;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
-use serde::{Serialize, Deserialize};
+use std::fmt;
 
 /// Trait for activation functions.
 pub trait Activation: fmt::Debug + Send + Sync + Any {
@@ -66,10 +66,18 @@ impl Default for LeakyReLU {
 
 impl Activation for LeakyReLU {
     fn apply(&self, x: f64) -> f64 {
-        if x > 0.0 { x } else { self.alpha * x }
+        if x > 0.0 {
+            x
+        } else {
+            self.alpha * x
+        }
     }
     fn derivative(&self, x: f64) -> f64 {
-        if x > 0.0 { 1.0 } else { self.alpha }
+        if x > 0.0 {
+            1.0
+        } else {
+            self.alpha
+        }
     }
 }
 
@@ -87,10 +95,18 @@ impl Default for ELU {
 
 impl Activation for ELU {
     fn apply(&self, x: f64) -> f64 {
-        if x > 0.0 { x } else { self.alpha * (x.exp() - 1.0) }
+        if x > 0.0 {
+            x
+        } else {
+            self.alpha * (x.exp() - 1.0)
+        }
     }
     fn derivative(&self, x: f64) -> f64 {
-        if x > 0.0 { 1.0 } else { self.apply(x) + self.alpha }
+        if x > 0.0 {
+            1.0
+        } else {
+            self.apply(x) + self.alpha
+        }
     }
 }
 
@@ -201,12 +217,26 @@ impl ActivationKind {
 /// Best-effort identification of activation kind from a trait object
 pub fn identify_activation_kind(a: &(dyn Activation + Send + Sync)) -> ActivationKind {
     let any = a as &dyn Any;
-    if any.is::<ReLU>() { return ActivationKind::ReLU; }
-    if any.is::<Sigmoid>() { return ActivationKind::Sigmoid; }
-    if any.is::<Tanh>() { return ActivationKind::Tanh; }
-    if any.is::<LeakyReLU>() { return ActivationKind::LeakyReLU; }
-    if any.is::<ELU>() { return ActivationKind::ELU; }
-    if any.is::<Swish>() { return ActivationKind::Swish; }
-    if any.is::<Softmax>() { return ActivationKind::Softmax; }
+    if any.is::<ReLU>() {
+        return ActivationKind::ReLU;
+    }
+    if any.is::<Sigmoid>() {
+        return ActivationKind::Sigmoid;
+    }
+    if any.is::<Tanh>() {
+        return ActivationKind::Tanh;
+    }
+    if any.is::<LeakyReLU>() {
+        return ActivationKind::LeakyReLU;
+    }
+    if any.is::<ELU>() {
+        return ActivationKind::ELU;
+    }
+    if any.is::<Swish>() {
+        return ActivationKind::Swish;
+    }
+    if any.is::<Softmax>() {
+        return ActivationKind::Softmax;
+    }
     ActivationKind::Linear
 }
